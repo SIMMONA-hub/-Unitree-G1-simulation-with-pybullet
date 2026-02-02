@@ -1,118 +1,193 @@
-# Unitree G1 Integration
+# Unitree G1 Autonomous Simulation (PyBullet)
 
-This repository provides drivers, simulation bridges, and demos to control the Unitree G1 robot (arms, hands, legs/waist) with multiple running modalities: real robot, PyBullet simulation, and MuJoCo simulation.
+This repository presents an autonomous simulation system for the Unitree G1 humanoid robot.
+The project was developed for the **Humanoid Robot Championship – Test Task: Search and Approach to an Object**.
 
-## Install
-```
-pip install -r requirements.txt
-```
+The focus of this work is to demonstrate a complete autonomous pipeline — from perception to motion —
+implemented under strict task constraints and without relying on simulator ground-truth shortcuts.
 
-## Prerequirements (external)
-- https://github.com/unitreerobotics/unitree_sdk2_python.git
-- conda install conda-forge::pinocchio
+---
+
+## Overview
+
+The robot operates fully autonomously and must:
+
+- search for a target object (cube)
+- detect the object using visual perception
+- orient itself toward the object
+- approach it
+- stop at a distance **≤ 0.5 meters**
+
+All actions are performed without human input and without access to the true object position.
+
+---
+
+## Motivation and Approach
+
+The task does not require highly dynamic humanoid locomotion.
+Instead, it emphasizes autonomy, perception, and correct system design.
+
+For this reason, the project prioritizes:
+- clarity of control logic
+- robustness to random initial conditions
+- strict compliance with competition rules
+- reproducibility and transparency
+
+The solution avoids unnecessary complexity and focuses on a clean, interpretable pipeline.
+
+---
+
+## Simulator Choice
+
+**PyBullet** is used as the primary simulator due to:
+
+- fast iteration and debugging
+- straightforward camera rendering
+- simple scene construction from scratch
+- sufficient physical realism for the task
+
+Support for MuJoCo is included in the repository, but PyBullet is the main evaluation environment.
+
+---
+
+## Simulation Scene
+
+The simulation environment is created manually and strictly follows the task specification:
+
+- Room size: **4 × 4 meters**
+- Square geometry
+- Flat floor
+- Static walls
+- No obstacles
+- Static lighting
+
+No prebuilt scenes or world files are used.
+
+---
+
+## Target Object
+
+- Type: cube
+- Size: **0.3 × 0.3 × 0.3 meters**
+- Placed on the floor
+- Uniform color
+- Position randomized between runs
+
+The robot has **no access** to the object’s true position or simulator state.
+
+---
+
+## Robot Model
+
+- Robot: **Unitree G1**
+- Initial position: center of the room
+- Initial orientation: randomized
+
+To ensure stability and simplicity:
+- the robot model is partially simplified
+- locomotion is implemented via abstract base velocity control
+- full humanoid walking dynamics are intentionally not modeled
+
+This approach is explicitly allowed by the competition rules.
+
+---
+
+## Sensors and Perception
+
+### RGB Camera
+- The RGB camera is the **primary and mandatory sensor**
+- Used for all object detection and navigation decisions
+
+### Restrictions
+- ❌ No ground-truth object coordinates
+- ❌ No direct access to simulator object states
+- ❌ No shortcuts via object IDs
+
+All decisions are made solely based on camera images.
+
+---
+
+## Object Detection
+
+A classical computer vision approach is used:
+
+- RGB image acquisition from the simulated camera
+- color-based segmentation
+- contour detection
+- bounding box extraction
+
+From the bounding box:
+- horizontal offset is used for orientation control
+- apparent object size is used as an indirect distance cue
+
+This approach is simple, interpretable, and robust enough for the task.
+
+---
+
+## Control Architecture
+
+Robot behavior is implemented as a finite-state machine:
+
+SEARCH → ALIGN → WALK → STOP 
 
 
-## Repository Structure (high-level)
-- `unitree_g1/`
-  - `unitree_g1.py`: Node wrapper integrating robot driver with Ark comms and joint groups.
-  - `unitree_g1_driver.py`: Real robot driver that talks to Unitree SDK (arms, hands, legs/waist).
-  - `robot_arm.py`: Low-level dual-arm controller using Unitree SDK channels (G1_29 arm indices).
-  - `robot_hand_unitree.py`: Low-level hand controller (Dex3-1) using Unitree SDK channels.
-  - `unitree_g1.yaml`: Configuration for real robot.
-  - `unitree_g1_sim.yaml`: Configuration for simulation.
-  - `urdf/urdf/g1_description.urdf`: Robot description used by IK and simulation tooling.
-- `tests/`
-  - `g1_pybullet_sim/`: PyBullet-based simulation utilities and example nodes.
-    - `sim_node.py`: Example simulation node wiring Ark topics in PyBullet.
-    - `g1_controller_interface.py`: Minimal example command publisher for all joints.
-    - `simple_hand_test.py`: Quick hand open/close test script.
-  - `g1_mujoco_sim/`: MuJoCo simulation bridge and configuration.
-    - `unitree_mujoco.py`: MuJoCo scene launcher.
-    - `unitree_sdk2py_bridge.py`: Bridge that publishes/consumes Unitree SDK-like topics from MuJoCo.
-  - `sim_real/`: Real-to-sim bridge utilities.
-    - `real_to_sim.py`: Subscribes real `joint_states` and republishes to sim as `joint_group_command`.
-  - `test_demo/`: Higher-level demos and IK utilities.
-    - `demo_pick_place.py`: Right-arm pick-and-place demo using IK and streaming commands.
-    - `robot_arm_ik.py`: Pinocchio-based IK solvers for G1/H1 variants.
+### SEARCH
+The robot rotates in place until the target object appears in the camera view.
 
+### ALIGN
+The robot rotates to center the object horizontally in the image.
 
-## Running Modalities
+### WALK
+The robot moves forward while continuously correcting its orientation.
 
-### 1) Real Robot (arms, hands, legs/waist)
-- Ensure Unitree SDK2 Python is installed and reachable (topics, DDS domains, NIC).
-- Configure `unitree_g1/unitree_g1.yaml` as needed (network interface, domain id, enabled sensors).
-- In `unitree_g1/unitree_g1.py`, SIM determines topic names; for real robot set `SIM = False`.
+### STOP
+The robot stops when the estimated distance to the object is **≤ 0.5 meters**.
 
-Run:
-```
-cd unitree_g1
-python unitree_g1.py
-```
+All transitions occur automatically without user interaction.
 
-This launches the Ark node, creates publishers/subscribers, and manages joint groups. The driver (`unitree_g1_driver.py`) internally spins threads to track state and send commands to arms and hands.
+---
 
+## Entry Point
 
-### 2) PyBullet Simulation
-Example minimal controller that drives all joints with tiny position targets (useful for plumbing checks):
-```
-python tests/g1_pybullet_sim/g1_controller_interface.py
-```
+The entire system is launched from a single script:
 
-Simple hand test sequence (open/close):
-```
-python tests/g1_pybullet_sim/simple_hand_test.py
-```
+```bash
+python run_g1_pybullet.py
+the scene is created
 
-Simulation configuration is under `tests/g1_pybullet_sim/config/`.
+the robot is spawned
 
+sensors are initialized
 
-### 3) MuJoCo Simulation
-The MuJoCo bridge emulates Unitree SDK topics for body and hands and consumes low-level commands.
+autonomous behavior starts immediately 
 
-Key entry points in `tests/g1_mujoco_sim/`:
-- `unitree_mujoco.py`: Loads the scene and model.
-- `unitree_sdk2py_bridge.py`: Publishes simulated `LowState`, `HandState` and consumes `LowCmd`, `HandCmd`.
+Design Principles
 
-Typical flow is to start the MuJoCo scene, then the bridge, then send commands from client scripts.
+This project prioritizes:
 
+autonomy over teleoperation
 
-### 4) Real-to-Sim Topic Bridge
-Bridge the real robot state into a simulation instance:
-```
-python tests/sim_real/real_to_sim.py
-```
-This subscribes to `unitree_g1/joint_states` and republishes the values to `unitree_g1_sim/joint_group_command` with group `all`.
+perception-based control over ground-truth access
 
+simplicity over overengineering
 
-### 5) Demos (IK-driven)
-Pick-and-Place using IK for the right arm:
-```
-python tests/test_demo/demo_pick_place.py
-```
+reproducibility over hard-coded solutions
 
-Pinocchio-based IK utilities and manual demos are in `tests/test_demo/robot_arm_ik.py`.
+No machine learning is required; classical methods are sufficient for the task. 
 
-Can be used both for controlling the robot in Mujoco or the real one.
+Result
 
+The robot reliably:
 
-## Joint Groups and Control
-- Joint order: the system uses a 43-DoF ordering (legs/waist, arms, hands). See `unitree_g1/unitree_g1.py` for the full list and indices.
-- Available groups include:
-  - `all` (position control)
-  - `left_hand` (position control; 7 joints)
-  - `right_hand` (position control; 7 joints)
-  - special: `arms_q_tau` expects 28 numbers `[q14, tau14]` (7 left + 7 right for `q` and `tau`). Useful for smooth motion with feed forward feedback.
+detects the object from different initial orientations
 
-Publish commands via Ark `joint_group_command_t` with the appropriate `name` and `cmd` payload.
+approaches it from various starting conditions
 
+stops within the required distance
 
-## Troubleshooting
-- Ensure the correct network interface and DDS domain are set in your config for real robot.
-- For MuJoCo or PyBullet, verify the system dependencies (graphics, drivers) and the versions from `requirements.txt`.
-- Ensure your real G1 is in Debug Mode before starting.
+remains robust to changes in object placement
 
-## Acknowledgments
-Large parts of this repository are adapted from `unitreerobotics/xr_teleoperate`:
-- https://github.com/unitreerobotics/xr_teleoperate
+A short demonstration video (≤ 2 minutes) shows a full autonomous run. 
 
-
+DEMO VIDEO
+https://youtu.be/aEe11XYtmU4?si=jyXA0adDBxsaK0WF
